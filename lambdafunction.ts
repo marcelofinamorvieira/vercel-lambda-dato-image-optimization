@@ -1,5 +1,23 @@
 // Vercel Lambda function to handle DatoCMS webhooks
-export default async function handler(req, res) {
+import type { NextApiRequest, NextApiResponse } from 'next';
+
+// Define interface for response data
+interface WebhookResponse {
+  received: boolean;
+  message: string;
+  timestamp?: string;
+  error?: string;
+}
+
+// Extend NextApiRequest to include the method property
+interface ExtendedNextApiRequest extends NextApiRequest {
+  method: string;
+}
+
+export default async function handler(
+  req: ExtendedNextApiRequest,
+  res: NextApiResponse<WebhookResponse | { error: string }>
+): Promise<void> {
   // Only allow POST requests for webhooks
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed. Only POST requests are accepted.' });
@@ -26,7 +44,7 @@ export default async function handler(req, res) {
     return res.status(500).json({ 
       received: false, 
       error: 'Failed to process webhook',
-      message: error.message
+      message: error instanceof Error ? error.message : String(error)
     });
   }
 }
