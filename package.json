@@ -1,0 +1,21 @@
+{
+  "name": "datocms-webhook-handler",
+  "version": "1.0.0",
+  "description": "Vercel Lambda function to receive and log DatoCMS webhooks",
+  "main": "index.js",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "next": "^12.0.0",
+    "react": "^17.0.2",
+    "react-dom": "^17.0.2"
+  },
+  "engines": {
+    "node": ">=14.x"
+  },
+  "author": "",
+  "license": "MIT"
+}
