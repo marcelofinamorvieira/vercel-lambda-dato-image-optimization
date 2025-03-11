@@ -1,76 +1,109 @@
-// Vercel Lambda function to handle DatoCMS webhooks
+/**
+ * DatoCMS Webhook Handler with Imgix Optimization
+ * 
+ * This serverless function receives webhooks from DatoCMS, detects image uploads,
+ * applies imgix optimization parameters, and optionally creates optimized versions
+ * in the DatoCMS Media Library.
+ *
+ * @module webhook
+ */
+
 import type { NextApiRequest, NextApiResponse } from 'next';
+import { createUploadFromUrl, deleteUpload } from '../../utils/datoCmsClient';
 
-// Define interface for response data
+/**
+ * Response data interface for the webhook handler.
+ * Contains information about the processed webhook and optimization results.
+ */
 interface WebhookResponse {
-  received: boolean;
-  message: string;
-  timestamp?: string;
-  error?: string;
-  optimizedUrl?: string;
+  received: boolean;            // Whether the webhook was successfully received
+  message: string;             // Status message
+  timestamp?: string;          // ISO timestamp of when the webhook was processed
+  error?: string;              // Error message if applicable
+  optimizedUrl?: string;       // The URL with imgix optimization parameters
+  newUploadId?: string;        // ID of the newly created optimized upload
+  originalDeleted?: boolean;   // Whether the original upload was deleted
 }
 
-// Define interface for image entity in webhook payload
+/**
+ * Interface for the image entity in the DatoCMS webhook payload.
+ */
 interface ImageEntity {
-  id: string;
-  type: string;
+  id: string;                  // DatoCMS Upload ID
+  type: string;                // Entity type (should be "upload")
   attributes: {
-    size: number;
-    width: number;
-    height: number;
-    url: string;
-    is_image: boolean;
-    [key: string]: unknown;
+    size: number;              // File size in bytes
+    width: number;             // Image width in pixels
+    height: number;            // Image height in pixels
+    url: string;               // Original image URL
+    is_image: boolean;         // Whether the upload is an image
+    filename?: string;         // Original filename
+    [key: string]: unknown;    // Other attributes from DatoCMS
   };
-  relationships: Record<string, unknown>;
+  relationships: Record<string, unknown>; // Relationships with other entities
 }
 
-// Define interface for webhook payload
+/**
+ * Interface for the DatoCMS webhook payload.
+ */
 interface WebhookPayload {
-  entity_type: string;
-  event_type: string;
-  entity: ImageEntity;
-  [key: string]: unknown;
+  entity_type: string;         // Type of entity (e.g., "upload")
+  event_type: string;          // Event type (e.g., "create", "update")
+  entity: ImageEntity;         // The entity data
+  [key: string]: unknown;      // Other fields from DatoCMS
 }
 
-// Extend NextApiRequest to include the method property
+/**
+ * Extended NextApiRequest interface with typed body and method.
+ */
 interface ExtendedNextApiRequest extends NextApiRequest {
-  method: string;
-  body: WebhookPayload;
+  method: string;             // HTTP method
+  body: WebhookPayload;       // Webhook payload
 }
 
-// Function to apply imgix optimizations to an image URL
+/**
+ * Applies imgix optimization parameters to an image URL based on its characteristics.
+ * 
+ * @param {string} imageUrl - The original image URL
+ * @param {number} width - Image width in pixels
+ * @param {number} height - Image height in pixels
+ * @param {number} size - Image file size in bytes
+ * @returns {string} URL with imgix optimization parameters
+ */
 function applyImgixOptimizations(imageUrl: string, width: number, height: number, size: number): string {
-  // Size threshold in bytes (e.g., 5MB)
-  const LARGE_IMAGE_THRESHOLD = 5 * 1024 * 1024;
-  const VERY_LARGE_IMAGE_THRESHOLD = 10 * 1024 * 1024;
+  // Define size thresholds
+  const LARGE_IMAGE_THRESHOLD = 5 * 1024 * 1024;      // 5MB
+  const VERY_LARGE_IMAGE_THRESHOLD = 10 * 1024 * 1024; // 10MB
   
-  // Base optimization parameters
+  // Start with base optimization parameters
+  // auto=format: Automatically chooses the best format (WebP/AVIF)
+  // compress: Applies intelligent compression
   let params = 'auto=format,compress';
   
-  // Apply different optimization levels based on image size
+  // Apply different optimization strategies based on image size
   if (size > LARGE_IMAGE_THRESHOLD) {
-    // For large images, apply more aggressive optimization
-    // Use a quality that balances size reduction and visual quality
+    // For large images (>5MB), apply more aggressive optimization
+    // Lower quality (75%) that still maintains good visual appearance
     params += '&q=75';
     
-    // If the image is very wide, consider resizing it
+    // If the image is very wide, resize it to a reasonable max width
+    // This significantly reduces file size while keeping it usable for most applications
     if (width > 2000) {
       params += '&w=2000';
     }
     
-    // Additional optimizations for very large images
+    // Additional optimizations for very large images (>10MB)
     if (size > VERY_LARGE_IMAGE_THRESHOLD) {
-      // More aggressive optimization for very large images while maintaining quality
-      // Set dpr to 2 for high-resolution displays
+      // Set device pixel ratio to 2 for high-resolution displays
+      // This ensures the image still looks good on high-DPI screens
       params += '&dpr=2';
     }
   } else {
-    // For smaller images, use lighter optimization
+    // For smaller images, use lighter optimization with better quality
     params += '&q=85';
   }
   
-  // Add parameters to the URL
+  // Add parameters to the URL properly with ? or & separator
   if (imageUrl.includes('?')) {
     return `${imageUrl}&${params}`;
   }
@@ -78,6 +111,14 @@ function applyImgixOptimizations(imageUrl: string, width: number, height: number
   return `${imageUrl}?${params}`;
 }
 
+/**
+ * Main webhook handler function.
+ * Processes incoming webhooks from DatoCMS and handles image optimization.
+ * 
+ * @param {ExtendedNextApiRequest} req - The request object with webhook payload
+ * @param {NextApiResponse} res - The response object
+ * @returns {Promise<void>}
+ */
 export default async function handler(
   req: ExtendedNextApiRequest,
   res: NextApiResponse<WebhookResponse | { error: string }>
@@ -92,31 +133,78 @@ export default async function handler(
     console.log('Received DatoCMS webhook:', JSON.stringify(req.body, null, 2));
     
     let optimizedUrl: string | undefined;
+    let newUploadId: string | undefined;
+    const originalDeleted = false; // Whether the original upload was deleted
     
     // Check if the webhook is for an image upload
     if (
       req.body.entity_type === 'upload' && 
       req.body.entity?.attributes?.is_image === true
     ) {
-      const { size, width, height, url } = req.body.entity.attributes;
+      const { id: originalUploadId } = req.body.entity;
+      const { size, width, height, url, filename } = req.body.entity.attributes;
       
-      // Log original image details
+      // Log original image details for diagnostics
       console.log(`Processing image: ${url}`);
       console.log(`Original size: ${(size / 1024 / 1024).toFixed(2)}MB, Dimensions: ${width}x${height}`);
       
-      // Apply imgix optimizations
+      // Apply imgix optimizations based on image characteristics
       optimizedUrl = applyImgixOptimizations(url, width, height, size);
       
       // Log the optimized URL
       console.log(`Optimized image URL: ${optimizedUrl}`);
+      
+      // Only create a new upload if the image is larger than the threshold (5MB)
+      // This avoids unnecessary processing for smaller images that don't need optimization
+      if (size > 5 * 1024 * 1024) {
+        try {
+          // Create a new upload in DatoCMS with the optimized URL
+          const uploadResponse = await createUploadFromUrl(
+            optimizedUrl, 
+            filename ? `optimized-${filename}` : undefined
+          );
+          
+          if (uploadResponse?.id) {
+            newUploadId = uploadResponse.id;
+            console.log(`Created new optimized upload with ID: ${newUploadId}`);
+            
+            // ============================================================
+            // DELETION OF ORIGINAL UPLOAD (COMMENTED OUT BY DEFAULT)
+            // ============================================================
+            // Uncomment the code below if you want to automatically delete the original upload
+            // after creating an optimized version. This will permanently delete the original
+            // high-resolution image from your DatoCMS Media Library.
+            // 
+            // IMPORTANT CONSIDERATIONS BEFORE ENABLING:
+            // 1. Make sure you have tested the optimization process thoroughly
+            // 2. Consider backing up your uploads before enabling this feature
+            // 3. You might want to add additional checks (e.g. verifying the new upload exists)
+            // 4. This operation is irreversible - the original upload will be permanently deleted
+            //
+            // try {
+            //   // Delete the original upload
+            //   await deleteUpload(originalUploadId);
+            //   console.log(`Deleted original upload with ID: ${originalUploadId}`);
+            //   originalDeleted = true;
+            // } catch (deleteError) {
+            //   console.error(`Failed to delete original upload with ID ${originalUploadId}:`, deleteError);
+            // }
+            // ============================================================
+          }
+        } catch (uploadError) {
+          console.error('Failed to create new upload:', uploadError);
+        }
+      }
     }
     
-    // Return a successful response to DatoCMS
+    // Return a successful response to DatoCMS with processing results
     return res.status(200).json({ 
       received: true, 
-      message: 'Webhook successfully received and logged',
+      message: 'Webhook successfully received and processed',
       timestamp: new Date().toISOString(),
-      optimizedUrl
+      optimizedUrl,
+      newUploadId,
+      originalDeleted
     });
   } catch (error) {
     // Log any errors that occur during processing
