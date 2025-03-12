@@ -2,16 +2,15 @@
  * DatoCMS Webhook Handler with Imgix Optimization
  * 
  * This serverless function receives webhooks from DatoCMS, detects image uploads,
- * applies imgix optimization parameters, and optionally creates optimized versions
+ * applies imgix optimization parameters, and replaces original assets with optimized versions
  * in the DatoCMS Media Library.
  *
  * @module webhook
  */
 
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { createUploadFromUrl, deleteUpload } from '../../utils/datoCmsClient';
-// Import is commented out as the functionality is disabled
-// import replaceAssetFromUrl from '../../utils/assetReplacer';
+// Import asset replacer functionality
+import replaceAssetFromUrl from '../../utils/assetReplacer';
 
 /**
  * Response data interface for the webhook handler.
@@ -24,8 +23,6 @@ interface WebhookResponse {
   error?: string;              // Error message if applicable
   optimizedUrl?: string;       // The URL with imgix optimization parameters
   assetReplaced?: boolean;     // Whether the original asset was replaced with an optimized version
-  newUploadId?: string;        // ID of the newly created optimized upload (legacy approach)
-  originalDeleted?: boolean;   // Whether the original upload was deleted (legacy approach)
 }
 
 /**
@@ -136,10 +133,7 @@ export default async function handler(
     console.log('Received DatoCMS webhook:', JSON.stringify(req.body, null, 2));
     
     let optimizedUrl: string | undefined;
-    let newUploadId: string | undefined;
-    // Asset replacement is disabled, so this is always false
-    const assetReplaced = false;
-    const originalDeleted = false; // Keeping this for backward compatibility
+    let assetReplaced = false;
     
     // Check if the webhook is for an image upload
     if (
@@ -164,45 +158,18 @@ export default async function handler(
       if (size > 5 * 1024 * 1024) {
         try {
           // Replace the original asset with the optimized version
-          // instead of creating a new one and deleting the original
-          // const replacementResult = await replaceAssetFromUrl(
-          //   originalUploadId,
-          //   optimizedUrl,
-          //   filename ? `optimized-${filename}` : undefined
-          // );
+          const replacementResult = await replaceAssetFromUrl(
+            originalUploadId,
+            optimizedUrl,
+            filename ? `optimized-${filename}` : undefined
+          );
           
-          // if (replacementResult?.data?.id) {
-          //   assetReplaced = true;
-          //   console.log(`Successfully replaced asset with ID: ${replacementResult.data.id} with optimized version`);
-          // }
+          if (replacementResult?.data?.id) {
+            assetReplaced = true;
+            console.log(`Successfully replaced asset with ID: ${replacementResult.data.id} with optimized version`);
+          }
         } catch (replacementError) {
-          // console.error('Failed to replace asset with optimized version:', replacementError);
-          
-          // // Fallback to the old approach of creating a new upload if replacement fails
-          // try {
-          //   // Create a new upload in DatoCMS with the optimized URL
-          //   const uploadResponse = await createUploadFromUrl(
-          //     optimizedUrl, 
-          //     filename ? `optimized-${filename}` : undefined
-          //   );
-            
-          //   if (uploadResponse?.id) {
-          //     newUploadId = uploadResponse.id;
-          //     console.log(`Created new optimized upload with ID: ${newUploadId}`);
-              
-          //     // The original deletion code is kept commented out for backward compatibility
-          //     // try {
-          //     //   // Delete the original upload
-          //     //   await deleteUpload(originalUploadId);
-          //     //   console.log(`Deleted original upload with ID: ${originalUploadId}`);
-          //     //   originalDeleted = true;
-          //     // } catch (deleteError) {
-          //     //   console.error(`Failed to delete original upload with ID ${originalUploadId}:`, deleteError);
-          //     // }
-          //   }
-          // } catch (uploadError) {
-          //   console.error('Failed to create new upload as fallback:', uploadError);
-          // }
+          console.error('Failed to replace asset with optimized version:', replacementError);
         }
       }
     }
@@ -213,9 +180,7 @@ export default async function handler(
       message: 'Webhook processed successfully',
       timestamp: new Date().toISOString(),
       optimizedUrl,
-      assetReplaced,
-      newUploadId,
-      originalDeleted,
+      assetReplaced
     });
   } catch (error) {
     console.error('Error processing webhook:', error);

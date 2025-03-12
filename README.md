@@ -6,16 +6,16 @@
 
 ## Overview
 
-This project provides a serverless function that receives webhooks from DatoCMS when new uploads are created. For large images (>5MB), it automatically applies imgix optimization parameters, creates a new optimized version in your DatoCMS Media Library, and optionally can delete the original high-resolution upload.
-
-The project also includes a commented-out implementation for directly replacing assets in-place (rather than creating duplicates), which can be enabled if needed.
+This project provides a serverless function that receives webhooks from DatoCMS when new uploads are created. For large images (>5MB), it automatically applies imgix optimization parameters and replaces the original assets in-place while preserving all relationships and references.
 
 ### Key Features
 
 - **Automatic Image Optimization**: Uses imgix parameters to optimize large images (>5MB)
 - **Intelligent Optimization Logic**: Applies different optimization strategies based on image size and dimensions
-- **DatoCMS Integration**: Creates new optimized uploads in your DatoCMS Media Library
-- **Optional Original Deletion**: Can delete original high-resolution uploads after optimization (disabled by default)
+- **In-place Replacement**: Updates the original asset rather than creating duplicates
+- **Relationship Preservation**: All content references to the original asset remain intact
+- **DatoCMS API Integration**: Uses the DatoCMS API with proper versioning (X-Api-Version: 3)
+- **Robust Error Handling**: Falls back to the original approach if replacement fails
 - **Type Safety**: Built with TypeScript for better maintainability and developer experience
 
 ## How It Works
@@ -24,8 +24,18 @@ The project also includes a commented-out implementation for directly replacing 
 2. The webhook handler checks if the upload is an image and if it's larger than 5MB
 3. If it meets the criteria, the handler:
    - Applies appropriate imgix optimization parameters (format, quality, size, etc.)
-   - Creates a new upload in your DatoCMS Media Library with the optimized version
-   - Optionally deletes the original high-resolution upload (disabled by default)
+   - Replaces the original asset with the optimized version using DatoCMS's API
+
+## Technical Implementation
+
+The asset replacement uses DatoCMS's API to:
+
+1. Create an upload request to get a pre-signed S3 URL
+2. Fetch the optimized image from the imgix URL
+3. Upload the optimized image to S3
+4. Update the original asset's metadata to point to the new file
+
+This approach maintains a single asset in your DatoCMS Media Library while still getting the benefits of optimization.
 
 ## Setup Instructions
 
@@ -65,7 +75,7 @@ cp .env.example .env
 DATOCMS_API_TOKEN=your_datocms_full_access_api_token
 ```
 
-> 🔑 **Important**: You need a Full-Access API token from DatoCMS to allow the webhook to create new uploads and delete existing ones.
+> 🔑 **Important**: You need a Full-Access API token from DatoCMS to allow the webhook to create new uploads and replace existing ones.
 
 ### Local Development
 
@@ -135,15 +145,16 @@ To modify the optimization logic, edit the `applyImgixOptimizations` function in
 - Resizing logic
 - Additional imgix parameters
 
-### Enabling Original Image Deletion
+### Disabling Asset Replacement
 
-By default, the original high-resolution image is preserved. To enable deletion after optimization:
+The asset replacement functionality is enabled by default. If you want to disable it to compare original vs. optimized images or refine your optimization strategy:
 
 1. Open `pages/api/webhook.ts`
-2. Find the commented section labeled "DELETION OF ORIGINAL UPLOAD"
-3. Uncomment the code block
+2. Comment out the asset replacement code block (around line 170)
+3. You can also modify the optimization parameters in the `applyImgixOptimizations` function to experiment with different settings
+4. To view both versions side by side, temporarily disable replacement while keeping the optimization URL generation
 
-> ⚠️ **Warning**: This will permanently delete original high-resolution uploads. Make sure you've thoroughly tested the optimization process before enabling this feature.
+This approach allows you to fine-tune the optimization process before committing to permanent asset replacements.
 
 ## Monitoring and Debugging
 
@@ -163,8 +174,7 @@ The webhook handler returns a JSON response with information about the processed
   "message": "Webhook successfully received and processed",
   "timestamp": "2023-04-12T15:30:45.123Z",
   "optimizedUrl": "https://www.datocms-assets.com/123/image.jpg?auto=format,compress&q=75",
-  "newUploadId": "abc123",
-  "originalDeleted": false
+  "assetReplaced": true
 }
 ```
 
@@ -178,6 +188,7 @@ The webhook handler returns a JSON response with information about the processed
 │   ├── api/              # API routes
 │   │   └── webhook.ts    # DatoCMS webhook handler
 ├── utils/
+│   ├── assetReplacer.ts  # Asset replacement functionality
 │   └── datoCmsClient.ts  # DatoCMS API client utilities
 ├── .env                  # Environment variables (not in git)
 ├── .env.example         # Example environment variables
@@ -194,30 +205,10 @@ The webhook handler returns a JSON response with information about the processed
 
 ## Common Issues
 
-### "Failed to create new upload" Error
+### "Failed to replace asset" Error
 
 If you see this error in the logs, check:
 
 1. Your DatoCMS API token has full access permissions
-2. The token is correctly set in your environment variables
-3. The imgix URL being generated is valid and accessible
-
-### Webhook Not Triggering
-
-If your webhook doesn't seem to be triggering, verify:
-
-1. The webhook is correctly configured in DatoCMS
-2. You've selected the "Upload created" event
-3. Your deployment platform is not blocking incoming POST requests
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
----
-
-Built with ❤️ for DatoCMS users
+2. The asset ID is valid and exists in your DatoCMS project
+3. The optimized image URL is accessible
