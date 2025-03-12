@@ -10,6 +10,8 @@
 
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { createUploadFromUrl, deleteUpload } from '../../utils/datoCmsClient';
+// Import is commented out as the functionality is disabled
+// import replaceAssetFromUrl from '../../utils/assetReplacer';
 
 /**
  * Response data interface for the webhook handler.
@@ -21,8 +23,9 @@ interface WebhookResponse {
   timestamp?: string;          // ISO timestamp of when the webhook was processed
   error?: string;              // Error message if applicable
   optimizedUrl?: string;       // The URL with imgix optimization parameters
-  newUploadId?: string;        // ID of the newly created optimized upload
-  originalDeleted?: boolean;   // Whether the original upload was deleted
+  assetReplaced?: boolean;     // Whether the original asset was replaced with an optimized version
+  newUploadId?: string;        // ID of the newly created optimized upload (legacy approach)
+  originalDeleted?: boolean;   // Whether the original upload was deleted (legacy approach)
 }
 
 /**
@@ -134,7 +137,9 @@ export default async function handler(
     
     let optimizedUrl: string | undefined;
     let newUploadId: string | undefined;
-    const originalDeleted = false; // Whether the original upload was deleted
+    // Asset replacement is disabled, so this is always false
+    const assetReplaced = false;
+    const originalDeleted = false; // Keeping this for backward compatibility
     
     // Check if the webhook is for an image upload
     if (
@@ -154,67 +159,71 @@ export default async function handler(
       // Log the optimized URL
       console.log(`Optimized image URL: ${optimizedUrl}`);
       
-      // Only create a new upload if the image is larger than the threshold (5MB)
+      // Only process optimization for images larger than the threshold (5MB)
       // This avoids unnecessary processing for smaller images that don't need optimization
       if (size > 5 * 1024 * 1024) {
         try {
-          // Create a new upload in DatoCMS with the optimized URL
-          const uploadResponse = await createUploadFromUrl(
-            optimizedUrl, 
-            filename ? `optimized-${filename}` : undefined
-          );
+          // Replace the original asset with the optimized version
+          // instead of creating a new one and deleting the original
+          // const replacementResult = await replaceAssetFromUrl(
+          //   originalUploadId,
+          //   optimizedUrl,
+          //   filename ? `optimized-${filename}` : undefined
+          // );
           
-          if (uploadResponse?.id) {
-            newUploadId = uploadResponse.id;
-            console.log(`Created new optimized upload with ID: ${newUploadId}`);
+          // if (replacementResult?.data?.id) {
+          //   assetReplaced = true;
+          //   console.log(`Successfully replaced asset with ID: ${replacementResult.data.id} with optimized version`);
+          // }
+        } catch (replacementError) {
+          // console.error('Failed to replace asset with optimized version:', replacementError);
+          
+          // // Fallback to the old approach of creating a new upload if replacement fails
+          // try {
+          //   // Create a new upload in DatoCMS with the optimized URL
+          //   const uploadResponse = await createUploadFromUrl(
+          //     optimizedUrl, 
+          //     filename ? `optimized-${filename}` : undefined
+          //   );
             
-            // ============================================================
-            // DELETION OF ORIGINAL UPLOAD (COMMENTED OUT BY DEFAULT)
-            // ============================================================
-            // Uncomment the code below if you want to automatically delete the original upload
-            // after creating an optimized version. This will permanently delete the original
-            // high-resolution image from your DatoCMS Media Library.
-            // 
-            // IMPORTANT CONSIDERATIONS BEFORE ENABLING:
-            // 1. Make sure you have tested the optimization process thoroughly
-            // 2. Consider backing up your uploads before enabling this feature
-            // 3. You might want to add additional checks (e.g. verifying the new upload exists)
-            // 4. This operation is irreversible - the original upload will be permanently deleted
-            //
-            // try {
-            //   // Delete the original upload
-            //   await deleteUpload(originalUploadId);
-            //   console.log(`Deleted original upload with ID: ${originalUploadId}`);
-            //   originalDeleted = true;
-            // } catch (deleteError) {
-            //   console.error(`Failed to delete original upload with ID ${originalUploadId}:`, deleteError);
-            // }
-            // ============================================================
-          }
-        } catch (uploadError) {
-          console.error('Failed to create new upload:', uploadError);
+          //   if (uploadResponse?.id) {
+          //     newUploadId = uploadResponse.id;
+          //     console.log(`Created new optimized upload with ID: ${newUploadId}`);
+              
+          //     // The original deletion code is kept commented out for backward compatibility
+          //     // try {
+          //     //   // Delete the original upload
+          //     //   await deleteUpload(originalUploadId);
+          //     //   console.log(`Deleted original upload with ID: ${originalUploadId}`);
+          //     //   originalDeleted = true;
+          //     // } catch (deleteError) {
+          //     //   console.error(`Failed to delete original upload with ID ${originalUploadId}:`, deleteError);
+          //     // }
+          //   }
+          // } catch (uploadError) {
+          //   console.error('Failed to create new upload as fallback:', uploadError);
+          // }
         }
       }
     }
     
     // Return a successful response to DatoCMS with processing results
     return res.status(200).json({ 
-      received: true, 
-      message: 'Webhook successfully received and processed',
+      received: true,
+      message: 'Webhook processed successfully',
       timestamp: new Date().toISOString(),
       optimizedUrl,
+      assetReplaced,
       newUploadId,
-      originalDeleted
+      originalDeleted,
     });
   } catch (error) {
-    // Log any errors that occur during processing
-    console.error('Error processing DatoCMS webhook:', error);
-    
-    // Return an error response
+    console.error('Error processing webhook:', error);
     return res.status(500).json({ 
-      received: false, 
-      error: 'Failed to process webhook',
-      message: error instanceof Error ? error.message : String(error)
+      received: true, 
+      message: 'Error processing webhook', 
+      error: error instanceof Error ? error.message : String(error),
+      timestamp: new Date().toISOString(),
     });
   }
 }

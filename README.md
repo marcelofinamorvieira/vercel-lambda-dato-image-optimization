@@ -8,6 +8,8 @@
 
 This project provides a serverless function that receives webhooks from DatoCMS when new uploads are created. For large images (>5MB), it automatically applies imgix optimization parameters, creates a new optimized version in your DatoCMS Media Library, and optionally can delete the original high-resolution upload.
 
+The project also includes a commented-out implementation for directly replacing assets in-place (rather than creating duplicates), which can be enabled if needed.
+
 ### Key Features
 
 - **Automatic Image Optimization**: Uses imgix parameters to optimize large images (>5MB)
