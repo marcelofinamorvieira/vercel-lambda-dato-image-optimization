@@ -14,7 +14,7 @@ This project provides a serverless function that receives webhooks from DatoCMS 
 - **Intelligent Optimization Logic**: Applies different optimization strategies based on image size and dimensions
 - **In-place Replacement**: Updates the original asset rather than creating duplicates
 - **Relationship Preservation**: All content references to the original asset remain intact
-- **DatoCMS API Integration**: Uses the DatoCMS API with proper versioning (X-Api-Version: 3)
+- **DatoCMS API Integration**: Uses the DatoCMS API to connect directly to your project
 - **Robust Error Handling**: Falls back to the original approach if replacement fails
 - **Type Safety**: Built with TypeScript for better maintainability and developer experience
 
